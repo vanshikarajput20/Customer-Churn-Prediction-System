@@ -2,6 +2,7 @@ import os
 import joblib
 import pandas as pd
 import numpy as np
+import shap
 
 def load_prediction_assets():
     """
@@ -22,13 +23,13 @@ def load_prediction_assets():
 def predict_churn(customer_data: dict):
     """
     Takes a dictionary of raw customer data, applies the same preprocessing steps 
-    as the training pipeline, and outputs a churn prediction.
+    as the training pipeline, outputs a churn prediction, and calculates SHAP values.
     
     Args:
         customer_data (dict): Single customer profile.
         
     Returns:
-        dict: Contains prediction (1 or 0) and probability score.
+        dict: Contains prediction (1 or 0), probability score, and top SHAP features.
     """
     try:
         model, scaler, label_encoders, numerical_cols, categorical_cols, feature_columns = load_prediction_assets()
@@ -37,7 +38,7 @@ def predict_churn(customer_data: dict):
         
     df = pd.DataFrame([customer_data])
     
-    # 1. Apply Feature Engineering (must match utils.py)
+    # 1. Apply Feature Engineering
     services = [
         'PhoneService', 'MultipleLines', 'InternetService', 
         'OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 
@@ -59,7 +60,6 @@ def predict_churn(customer_data: dict):
     for col in categorical_cols:
         if col in df.columns:
             le = label_encoders[col]
-            # Handle potentially unseen labels gracefully by assigning the first known class
             if df[col].iloc[0] not in le.classes_:
                 df[col] = le.transform([le.classes_[0]])[0]
             else:
@@ -81,13 +81,44 @@ def predict_churn(customer_data: dict):
     prob = model.predict_proba(X)[0][1]
     pred = int(prob > 0.5)
     
+    # 4. Calculate SHAP values for Explainability
+    try:
+        # Determine explainer type based on model
+        if hasattr(model, 'feature_importances_'):
+            # Tree-based model
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X)
+            # Depending on model (e.g. Random Forest), shap_values might be a list for multi-class/binary
+            if isinstance(shap_values, list):
+                shap_values = shap_values[1] # Take the positive class
+        else:
+            # Linear model (e.g. Logistic Regression)
+            # Use a background dataset of zeros (mean of scaled data)
+            background = pd.DataFrame(np.zeros((1, X.shape[1])), columns=X.columns)
+            explainer = shap.LinearExplainer(model, background)
+            shap_values = explainer.shap_values(X)
+            
+        # Ensure array shape is flat
+        shap_values = np.array(shap_values).flatten()
+        
+        # Zip features with their shap values and sort by absolute impact
+        feature_impacts = list(zip(feature_columns, shap_values))
+        feature_impacts.sort(key=lambda x: abs(x[1]), reverse=True)
+        
+        # Get top 3 features
+        top_3_features = [{"feature": f, "impact": float(val)} for f, val in feature_impacts[:3]]
+    except Exception as e:
+        print(f"SHAP explanation failed: {e}")
+        top_3_features = []
+    
     return {
         "prediction": pred,
-        "probability": float(prob)
+        "probability": float(prob),
+        "top_features": top_3_features
     }
 
 if __name__ == "__main__":
-    # Smoke test for prediction functionality
+    # Smoke test
     sample = {
         'gender': 'Female',
         'SeniorCitizen': 0,

@@ -145,6 +145,25 @@ with col1:
                 
                 st.markdown(f"**Risk Category:** <span class='{risk_class}'>{risk_level}</span>", unsafe_allow_html=True)
                 st.info(f"**Recommended Action:** {action_msg}")
+                
+                # Model Explainability (SHAP)
+                st.markdown("### Why did the model predict this?")
+                top_features = result.get("top_features", [])
+                if top_features:
+                    features = [f["feature"] for f in top_features]
+                    impacts = [f["impact"] for f in top_features]
+                    
+                    fig_shap, ax_shap = plt.subplots(figsize=(6, 3))
+                    # Color positive impact red (increases churn), negative impact green (decreases churn)
+                    colors_shap = ['#DC2626' if v > 0 else '#16A34A' for v in impacts]
+                    ax_shap.barh(features, impacts, color=colors_shap, height=0.5)
+                    ax_shap.set_xlabel("Impact on Prediction (Log Odds)")
+                    ax_shap.set_title("Top 3 Contributing Factors")
+                    ax_shap.invert_yaxis()  # largest impact at top
+                    ax_shap.spines['top'].set_visible(False)
+                    ax_shap.spines['right'].set_visible(False)
+                    st.pyplot(fig_shap)
+                    plt.close(fig_shap)
 
 with col2:
     st.subheader("Profile Overview")
